@@ -1,0 +1,122 @@
+# Dandadan preset for dan-da-dye.
+#
+# All paths are relative to the data root (DANDADYE_DATA or --data), which lives
+# OUTSIDE this repository. Nothing referenced here is committed: the pages and
+# the official character art stay on your own disk.
+
+series = "dandadan"
+title = "Dandadan"
+
+# Source pages: one sub-directory per chapter (e.g. src/150/000.jpg), or one per
+# volume (src/v17/) whose filenames carry the chapter as "cNNN" and the page as "pNNN"
+# (or "pNNN-pMMM" for a spread).
+source_dir = "work/src"
+volume_dir_pattern = '^v\d+$'
+volume_chapter_regex = 'c(\d+(?:\.\d+)?)'
+volume_page_regex = 'p(\d+)(?:-p?(\d+))?'   # "p134-p135" = spread
+
+# Colour palette measured from official setting art (see palette.md in the data root).
+palette = "palette/palette.json"
+
+# Characters known to the pipeline. `art` = official setting art (transparent PNG),
+# used both as Magi's character bank and for the colour reference sheet.
+# `palette_key` = top-level key in palette.json.
+[[characters]]
+name = "Momo"
+art = "palette/img/momo_pc/momo_pc.png"
+palette_key = "Momo Ayase"
+main_cast = true
+
+[[characters]]
+name = "Okarun"
+art = "palette/img/ken_pc/ken_pc.png"
+palette_key = "Okarun (Ken Takakura)"
+main_cast = true
+
+[[characters]]
+name = "Aira"
+art = "palette/img/aira_pc/aira_pc.png"
+palette_key = "Aira Shiratori"
+main_cast = true
+
+[[characters]]
+name = "Jiji"
+art = "palette/img/jiji_pc/jiji_pc.png"
+palette_key = "Jiji (Jin Enjoji)"
+main_cast = true
+
+[[characters]]
+name = "Seiko"
+art = "palette/img/seiko_pc/seiko_pc.png"
+palette_key = "Seiko Ayase"
+main_cast = false
+
+[[characters]]
+name = "Turbo Granny"
+art = "palette/img/turbo-granny_pc/turbo-granny_pc.png"
+palette_key = "Turbo Granny (maneki-neko form)"
+main_cast = true
+
+[[characters]]
+name = "Turbo Granny (yokai)"
+art = "palette/img/turbo-granny-changed_pc/turbo-granny-changed_pc.png"
+palette_key = "Turbo Granny (yokai form)"
+
+[[characters]]
+name = "Kinta"
+art = "palette/img/kinta_pc/kinta_pc.png"
+palette_key = "Other: Kinta Sakata"
+
+[[characters]]
+name = "Evil Eye"
+art = "palette/img/jashi_pc/jashi_pc.png"
+palette_key = "Other: Evil Eye"
+
+[[characters]]
+name = "Acrobatic Silky"
+art = "palette/img/sarasara_pc/sarasara_pc.png"
+palette_key = "Other: Acrobatic Silky"
+
+[[characters]]
+name = "Dover Demon"
+art = "palette/img/damon_pc/damon_pc.png"
+palette_key = "Other: Dover Demon"
+
+[[characters]]
+name = "Chiquitita"
+art = "palette/img/chiquitita_pc/chiquitita_pc.png"
+palette_key = "Other: Chiquitita"
+
+[[characters]]
+name = "Flatwoods Monster"
+art = "palette/img/floodwoods_pc/floodwoods_pc.png"
+palette_key = "Other: Flatwoods Monster"
+
+[[characters]]
+name = "Naki"
+art = "palette/img/naki_pc/naki_pc.png"
+palette_key = "Other: Naki Kito"
+
+[[characters]]
+name = "Manjiro"
+art = "palette/img/manjiro_pc/manjiro_pc.png"
+palette_key = "Other: Manjiro"
+
+[[characters]]
+name = "Taro"
+art = "palette/img/taro_pc/taro_pc.png"
+palette_key = "Other: Taro (anatomical model)"
+
+[[characters]]
+name = "Hana"
+art = "palette/img/hana_pc/hana_pc.png"
+palette_key = "Other: Hana (anatomical model)"
+
+[[characters]]
+name = "Serpoian"
+art = "palette/img/serpoians_pc/serpoians_pc.png"
+palette_key = "Serpoians"
+
+[colourise]
+# Optional extra words after the trigger word, e.g. "soft anime cel shading".
+prompt_extra = ""

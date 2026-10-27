@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dan-da-dye"
+version = "0.1.0"
+description = "Reference-guided manga colourisation pipeline for Apple Silicon (FLUX.2 Klein + LoRA via mflux)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+# mflux is only needed for the colourise stage (Apple Silicon only).
+mlx = ["mflux>=0.23"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+dandadye = "dandadye.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

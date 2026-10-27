@@ -1,0 +1,47 @@
+# --- Never commit manga pages, coloured output, frames or official art ---
+data/
+work/
+out/
+output/
+outputs/
+export/
+models/
+lora/
+palette/img/
+hf/
+*.sqlite
+*.sqlite3
+*.db
+# image files anywhere in the repo, except the explicit allow-list below
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.jfif
+*.bmp
+*.tif
+*.tiff
+*.safetensors
+*.bin
+*.ckpt
+*.pt
+*.npy
+*.npz
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv*/
+build/
+dist/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code subagent worktrees
+.claude/worktrees/

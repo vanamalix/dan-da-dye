@@ -11,7 +11,8 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
     "numpy>=1.26",
-    "pillow>=10",
+    # Pillow 13 needs Python >= 3.13 (numbers._IntegralLike) and breaks mflux on 3.12.
+    "pillow>=12.3,<13",
 ]
 
 [project.optional-dependencies]

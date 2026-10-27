@@ -66,7 +66,7 @@ def test_upscales_to_colour_resolution():
 
 def test_inkfix_run(ingested):
     cfg, st = ingested
-    d = cfg.work / "colour" / "10"
+    d = cfg.work / "colour" / "flux2-lora" / "10"
     d.mkdir(parents=True)
     with Image.open(st.get("10/001")["ingest"]["src"]) as im:
         fake_model_output(im).save(d / "001.png")

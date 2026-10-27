@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .config import load_config
@@ -55,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("colourise", help="run FLUX.2 Klein edit + LoRA on each page")
     _add_common(p)
+    p.add_argument("--engine", choices=["flux2-lora", "flux3"], default="flux2-lora",
+                   help="flux2-lora = FLUX.2 Klein base 9B + manga LoRA; flux3 = FLUX 3 Image Klein multi-reference")
     p.add_argument("--dry-run", action="store_true", help="print the mflux commands, don't run")
     p.add_argument("--backend", choices=["api", "cli"], default="api",
                    help="api = load the model once per batch (fast); cli = one mflux process per page")
@@ -74,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("inkfix", help="restore original linework and lettering over the colour")
     _add_common(p)
-    p.add_argument("--colour-dir", help="take colour images from here instead of work/colour")
+    p.add_argument("--engine", choices=["flux2-lora", "flux3"], default="flux2-lora",
+                   help="which colourise output to use (work/colour/<engine>/)")
+    p.add_argument("--colour-dir", help="take colour images from here instead of work/colour/<engine>")
 
     p = sub.add_parser("export", help="write webp pages + manifest.json")
     _add_common(p)
@@ -83,8 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-bw", action=argparse.BooleanOptionalAction, default=True,
                    help="fall back to the original page when no colour version exists")
 
-    p = sub.add_parser("upload", help="(stub) show what would be uploaded to R2")
+    p = sub.add_parser("upload", help="upload new pages then manifest.json to R2 (dry run unless --yes)")
     _add_common(p)
+    p.add_argument("--yes", action="store_true", help="really upload (runs wrangler r2 object put --remote)")
+    p.add_argument("--reader-dir", default=os.environ.get("DANDADYE_READER_DIR"),
+                   help="reader project dir where wrangler runs (default: $DANDADYE_READER_DIR)")
+    p.add_argument("--bucket", default="dandadan-manga")
+    p.add_argument("--allow-removal", action="store_true",
+                   help="allow a manifest that drops chapters already published")
 
     p = sub.add_parser("qa", help="(placeholder) check colour drift against the palette")
     _add_common(p)
@@ -132,14 +143,16 @@ def main(argv: list[str] | None = None) -> int:
                       backend=args.backend, force=args.force, include_skipped=args.include_skipped)
     elif args.stage == "inkfix":
         from . import inkfix
-        inkfix.run(cfg, state, chapters, pages, force=args.force, colour_dir=args.colour_dir)
+        inkfix.run(cfg, state, chapters, pages, force=args.force, colour_dir=args.colour_dir,
+                   engine=args.engine)
     elif args.stage == "export":
         from . import export
         export.run(cfg, state, chapters, height=args.height, quality=args.quality,
                    allow_bw=args.allow_bw, force=args.force)
     elif args.stage == "upload":
         from . import export
-        export.upload_stub(cfg, chapters)
+        export.upload(cfg, chapters, yes=args.yes, reader_dir=args.reader_dir, bucket=args.bucket,
+                      allow_removal=args.allow_removal)
     elif args.stage == "qa":
         from . import qa
         qa.run(cfg, state, chapters, pages, checker=args.checker, force=args.force)

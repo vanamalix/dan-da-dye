@@ -82,28 +82,31 @@ def recombine(original: Image.Image, colour: Image.Image, text_boxes=None, panel
     return Image.fromarray(np.clip(np.round(out * 255), 0, 255).astype(np.uint8), "RGB")
 
 
-def colour_path(cfg: Config, cid: str, idx: int, colour_dir: str | None = None) -> Path:
-    root = Path(colour_dir) if colour_dir else cfg.work / "colour"
+def colour_path(cfg: Config, cid: str, idx: int, engine: str = "flux2-lora",
+                colour_dir: str | None = None) -> Path:
+    root = Path(colour_dir) if colour_dir else cfg.work / "colour" / engine
     return root / cid / f"{idx:03d}.png"
 
 
 def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None = None,
-        force: bool = False, colour_dir: str | None = None, log=print) -> None:
+        force: bool = False, colour_dir: str | None = None, engine: str = "flux2-lora", log=print) -> None:
+    """Recombine the colour of one engine; the page's published version follows the last run."""
     done = missing = 0
     for key, cid, idx, data in state.pages(chapters):
         if pages and idx not in pages:
             continue
-        src = colour_path(cfg, cid, idx, colour_dir)
+        src = colour_path(cfg, cid, idx, engine, colour_dir)
         if not src.exists():
             missing += 1
             continue
-        out = cfg.stage_dir(f"inkfix/{cid}") / f"{idx:03d}.png"
-        if out.exists() and not force and data.get("inkfix", {}).get("path") == str(out):
+        out = cfg.stage_dir(f"inkfix/{engine}/{cid}") / f"{idx:03d}.png"
+        if out.exists() and not force and data.get("inkfix", {}).get("path") == str(out) \
+                and out.stat().st_mtime >= src.stat().st_mtime:
             continue
         det = data.get("detect", {})
         with Image.open(data["ingest"]["src"]) as orig, Image.open(src) as colour:
             result = recombine(orig, colour, det.get("texts"), det.get("panels"))
         result.save(out)
-        state.update(key, "inkfix", {"path": str(out), "from": str(src), "w": result.width, "h": result.height})
+        state.update(key, "inkfix", {"path": str(out), "from": str(src), "engine": engine, "w": result.width, "h": result.height})
         done += 1
     log(f"inkfix: {done} pages written, {missing} without a colour image yet")

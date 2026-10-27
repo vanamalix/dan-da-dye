@@ -24,7 +24,7 @@ def test_command_has_exact_image_order_and_lora(cfg):
 
 def test_settings_precedence(cfg):
     cfg.preset.colourise = {"steps": 30, "prompt_extra": "soft light"}
-    args = argparse.Namespace(model=None, model_path=None, quantize=8, steps=None, guidance=None,
+    args = argparse.Namespace(engine=None, model=None, model_path=None, quantize=8, steps=None, guidance=None,
                               lora_scale=1.0, megapixels=None, seed=None, prompt_extra=None,
                               low_ram=False, no_quantize=False)
     s = Settings.from_config(cfg, args)
@@ -62,8 +62,42 @@ def test_dry_run_skips_flagged_pages_and_needs_refsheet(ingested):
     assert not (cfg.work / "colourise_in").exists()  # dry run writes nothing
 
 
-def test_mflux_accepts_the_command(cfg):
-    pytest.importorskip("mflux")
-    s = Settings.from_config(cfg)
-    cmd = build_command(s, Path("/p/page.png"), Path("/p/ref.png"), Path("/p/out.png"), 832, 1216)
+def test_flux3_engine_defaults_and_multi_reference(cfg):
+    s = Settings.from_config(cfg, engine="flux3")
+    assert (s.model, s.steps, s.guidance, s.uses_lora) == ("flux3-image-klein", 16, None, False)
+    refs = colourise.solo_sheets(cfg, ["Alice", "Bob", "Nobody"], s.max_refs)
+    assert [r.name for r in refs] == ["alice.png", "bob.png"] and all(r.exists() for r in refs)
+    prompt = colourise.flux3_prompt(cfg, ["Alice", "Bob"])
+    assert "<ref_image_1>" in prompt and "Alice is coloured as in <ref_image_2>" in prompt
+    assert "#c8505a" in prompt and "<ref_image_3>" in prompt
+    cmd = build_command(s, Path("/p/page.png"), refs, Path("/p/o.png"), 832, 1216, prompt)
+    i = cmd.index("--image-paths")
+    assert cmd[i + 1:i + 4] == ["/p/page.png", str(refs[0]), str(refs[1])]
+    assert "--lora-paths" not in cmd and "--guidance" not in cmd
+    assert cmd[0].endswith("mflux-generate-flux3-edit")
+
+
+def test_flux3_dry_run(ingested):
+    cfg, st = ingested
+    refsheet.run(cfg, st, ["10"], log=lambda *a: None)
+    s = Settings.from_config(cfg, engine="flux3")
+    cmds = colourise.run(cfg, st, ["10"], {1}, s, dry_run=True, log=lambda *a: None)
+    assert len(cmds) == 1 and cmds[0][cmds[0].index("--output") + 1].endswith("colour/flux3/10/001.png")
+
+
+def _mflux_usable():
+    try:
+        import mflux.models.flux2.cli.flux2_edit_generate  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _mflux_usable(), reason="mflux not importable in this interpreter")
+@pytest.mark.parametrize("engine", ["flux2-lora", "flux3"])
+def test_mflux_accepts_the_command(cfg, engine):
+    s = Settings.from_config(cfg, engine=engine)
+    Path(s.lora_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(s.lora_path).write_bytes(b"")  # mflux checks the LoRA file exists; it is not loaded
+    cmd = build_command(s, Path("/p/page.png"), [Path("/p/ref.png")], Path("/p/out.png"), 832, 1216, "x")
     assert validate_with_mflux(cmd) == ""

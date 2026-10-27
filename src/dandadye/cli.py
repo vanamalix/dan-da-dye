@@ -87,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quality", type=int, default=85)
     p.add_argument("--allow-bw", action=argparse.BooleanOptionalAction, default=True,
                    help="fall back to the original page when no colour version exists")
+    p.add_argument("--keep-blank", action="store_true", help="also publish pages flagged blank")
 
     p = sub.add_parser("upload", help="upload new pages then manifest.json to R2 (dry run unless --yes)")
     _add_common(p)
@@ -148,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.stage == "export":
         from . import export
         export.run(cfg, state, chapters, height=args.height, quality=args.quality,
-                   allow_bw=args.allow_bw, force=args.force)
+                   allow_bw=args.allow_bw, force=args.force, keep_blank=args.keep_blank)
     elif args.stage == "upload":
         from . import export
         export.upload(cfg, chapters, yes=args.yes, reader_dir=args.reader_dir, bucket=args.bucket,

@@ -28,7 +28,7 @@ def make_detector(name: str, cfg: Config, device: str = "auto", eta: float = 0.7
     return DETECTORS[name].from_config(cfg, device=device, eta=eta)
 
 
-def assign_names(pages: list[dict], overrides: dict[str, str], threshold: float = 0.55) -> None:
+def assign_names(pages: list[dict], overrides: dict[str, str], threshold: float = 0.75) -> None:
     """Add chapter-wide 'cluster' and final 'name' to every character, in place."""
     flat = [(pi, ci) for pi, p in enumerate(pages) for ci in range(len(p["characters"]))]
     embs = [pages[pi]["embeddings"][ci] for pi, ci in flat] if all(p.get("embeddings") for p in pages

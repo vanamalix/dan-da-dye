@@ -190,7 +190,7 @@ def export_root(cfg: Config) -> Path:
 
 
 def run(cfg: Config, state: State, chapters: list[str], height: int = 1600, quality: int = 85,
-        allow_bw: bool = True, force: bool = False, log=print) -> dict:
+        allow_bw: bool = True, force: bool = False, keep_blank: bool = False, log=print) -> dict:
     series = cfg.preset.series
     root = export_root(cfg)
     ledger = Ledger(root / "published.json")
@@ -198,6 +198,9 @@ def run(cfg: Config, state: State, chapters: list[str], height: int = 1600, qual
     for cid in chapters:
         page_entries = []
         for key, _, idx, data in state.pages([cid]):
+            if data.get("ingest", {}).get("blank") and not keep_blank:
+                tally["blank-skipped"] = tally.get("blank-skipped", 0) + 1
+                continue
             src, why = pick_source(data, allow_bw)
             tally[why] = tally.get(why, 0) + 1
             if src is None:

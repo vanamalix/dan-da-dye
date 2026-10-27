@@ -7,7 +7,7 @@ from collections import Counter
 import numpy as np
 
 
-def cluster_embeddings(embs, threshold: float = 0.55) -> list[int]:
+def cluster_embeddings(embs, threshold: float = 0.75) -> list[int]:
     """Average-linkage agglomerative clustering; merge while mean cosine sim > threshold."""
     x = np.asarray(embs, dtype=np.float64)
     n = len(x)

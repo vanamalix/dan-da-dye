@@ -111,6 +111,14 @@ def test_upload_dry_run_then_real_with_fake_wrangler(ingested, tmp_path):
         export.upload(cfg, ["11"], log=lambda *a: None)
 
 
+def test_blank_pages_skipped_by_default(ingested):
+    cfg, st = ingested
+    export.run(cfg, st, ["11"], height=440, log=lambda *a: None)
+    assert len(manifest_of(cfg)["chapters"][0]["pages"]) == 2  # 2 of 4 pages are blank
+    export.run(cfg, st, ["11"], height=440, keep_blank=True, log=lambda *a: None)
+    assert len(manifest_of(cfg)["chapters"][0]["pages"]) == 4
+
+
 def test_source_choice(ingested):
     cfg, st = ingested
     assert export.pick_source(st.get("1/001"), True)[1] == "original"     # official colour page

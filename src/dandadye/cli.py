@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.chapters or args.start is not None or args.end is not None:
             only = _chapters(args, list(ingest.discover(cfg)))
         summary = ingest.run(cfg, only, force=args.force, export_pairs=not args.no_pairs,
-                             workers=args.workers)
+                             workers=args.workers, log=lambda m: print(m, file=sys.stderr))
         print(json.dumps(summary, indent=1) if args.json else ingest.format_summary(summary))
         return 0
 

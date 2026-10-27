@@ -74,3 +74,14 @@ def test_inkfix_run(ingested):
     rec = st.get("10/001")["inkfix"]
     assert rec["w"] == 600 and Image.open(rec["path"]).mode == "RGB"
     assert "inkfix" not in st.get("10/002")
+
+
+def test_whole_balloon_cleaned_from_text_box():
+    page = bw_page()
+    w = page.width
+    text_box = [w - 222, 90, w - 98, 148]          # just the lettering, inside the ellipse balloon
+    out = np.asarray(inkfix.recombine(page, fake_model_output(page), text_boxes=[text_box],
+                                      upscale_to_colour=False))
+    assert (out[120, w - 245] == 255).all()        # balloon interior outside the text box: white
+    assert (out[120, w - 75] == 255).all()
+    assert chroma(Image.fromarray(out[200:240, w - 240:w - 80])).mean() > 5  # outside the balloon: still coloured

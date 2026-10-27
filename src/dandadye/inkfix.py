@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 from .config import Config
 from .state import State
@@ -43,6 +43,31 @@ def _box_mask(shape: tuple[int, int], boxes, scale: float, grow: float = 0.08) -
         xb, yb = min(w, int(np.ceil(x2 + gx))), min(h, int(np.ceil(y2 + gy)))
         m[ya:yb, xa:xb] = True
     return m
+
+
+def balloon_mask(g: np.ndarray, boxes, scale: float, grow: float = 0.6, level: float = 0.85) -> np.ndarray:
+    """White paper connected to each text box, within a grown box: the balloon interior.
+
+    Flood-fills from the white pixels inside the text box, so the fill stops at the
+    balloon's ink outline (or at the grown box if the balloon is open).
+    """
+    h, w = g.shape
+    out = np.zeros((h, w), dtype=bool)
+    for b in boxes or []:
+        x1, y1, x2, y2 = (v * scale for v in b[:4])
+        gx, gy = (x2 - x1) * grow, (y2 - y1) * grow
+        xa, ya, xb, yb = max(0, int(x1 - gx)), max(0, int(y1 - gy)), min(w, int(x2 + gx)), min(h, int(y2 + gy))
+        if xb - xa < 3 or yb - ya < 3:
+            continue
+        region = Image.fromarray(((g[ya:yb, xa:xb] > level) * 255).astype(np.uint8), "L").copy()  # writable
+        seeds_y, seeds_x = np.nonzero(np.asarray(region)[int(y1 - ya):int(y2 - ya), int(x1 - xa):int(x2 - xa)])
+        step = max(1, len(seeds_x) // 40)
+        for sx, sy in zip(seeds_x[::step], seeds_y[::step]):
+            pt = (int(sx + x1 - xa), int(sy + y1 - ya))
+            if region.getpixel(pt) == 255:
+                ImageDraw.floodfill(region, pt, 128)
+        out[ya:yb, xa:xb] |= np.asarray(region) == 128
+    return out
 
 
 def recombine(original: Image.Image, colour: Image.Image, text_boxes=None, panel_boxes=None,
@@ -76,7 +101,8 @@ def recombine(original: Image.Image, colour: Image.Image, text_boxes=None, panel
         paper |= (g > 0.9) & ~_box_mask(g.shape, panel_boxes, scale, grow=0.0)
     if text_boxes:
         tm = _box_mask(g.shape, text_boxes, scale)
-        out[tm] = g[tm][:, None]  # lettering + balloon straight from the original
+        out[tm] = g[tm][:, None]  # lettering straight from the original
+        paper |= balloon_mask(g, text_boxes, scale)  # and the rest of the balloon white
     out[paper] = 1.0
 
     return Image.fromarray(np.clip(np.round(out * 255), 0, 255).astype(np.uint8), "RGB")

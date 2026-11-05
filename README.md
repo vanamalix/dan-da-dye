@@ -1,16 +1,30 @@
 # dan-da-dye
 
-A small, resumable pipeline that colourises black-and-white manga on Apple Silicon with a
-reference-guided diffusion model. For each page it detects who is on it, builds a colour
-reference sheet from official character art, asks FLUX.2 Klein (with a manga-colourisation LoRA)
-to paint the page, and puts the original ink and lettering back on top. It then exports
-webp pages and a manifest for a reader site.
+Colours black-and-white manga on a Mac, one page at a time.
 
-The code is generic. Everything series-specific lives in a preset (`presets/dandadan/`).
+It was built for one job: turning *Dandadan*, a manga drawn in black and white on purpose, into a colour
+edition nobody asked for, to be read in a private web reader on a folding phone. It runs entirely on Apple
+Silicon. There is no cloud GPU, no subscription and no hurry, which is fortunate, because it is not fast.
 
-> **This repository contains no manga pages, coloured output, screenshots or official art, and
-> never should.** All of those live in a *data root* outside the repo. Tests draw their own
-> synthetic images with PIL. `.gitignore` refuses image files.
+> **This is AI slop, and it says so on the tin.** The code was written with Claude (Anthropic's model),
+> mostly by describing what was wanted and then reading what came back. The pages are painted by a
+> diffusion model making educated guesses about what colour a ghost is. A human reviewed both, mostly
+> out of a desire to read the manga. It works. It is also occasionally, confidently, wrong about hair.
+
+**Status:** early. Every stage runs; the colouring stage has been dry-run more often than it has been run.
+
+## What it is for
+
+- Colouring manga pages **you already own**, for **your own reading**. The repo ships no pages, no
+  coloured output and no official art, and its `.gitignore` refuses image files on principle.
+- Apple Silicon Macs (M1 or later). The models run on the GPU through
+  [MLX](https://github.com/ml-explore/mlx) (via [mflux](https://github.com/filipstrand/mflux)) and PyTorch's
+  MPS backend, both of which sit on Metal. There is no CUDA path, and nobody has missed it.
+- Not for: selling anything, publishing anything, or reading anything you did not buy. The models' own
+  licences say non-commercial (see Credits), and so does common sense.
+
+What you need: macOS on Apple Silicon, Python 3.12, about 90 GB of disk for the models, and 16 GB of memory
+at the very least (see "Memory" below). Patience is not listed as a dependency but is required.
 
 ## How it works
 
@@ -36,6 +50,9 @@ idempotent: it skips finished work, and `--force` redoes it. The common options 
 `--chapters 150,245.1` and `--pages 1-5`.
 
 ## Setup
+
+**Moved the repo?** The `.venv` remembers where it was installed from (`pip install -e`). Either reinstall
+from the new place (`"$DANDADYE_DATA/.venv/bin/pip" install -e .`) or leave a symlink at the old path.
 
 Apple Silicon Mac, Python 3.12.
 

@@ -26,6 +26,25 @@ Silicon. There is no cloud GPU, no subscription and no hurry, which is fortunate
 What you need: macOS on Apple Silicon, Python 3.12, about 90 GB of disk for the models, and 16 GB of memory
 at the very least (see "Memory" below). Patience is not listed as a dependency but is required.
 
+## Quickstart
+
+```sh
+git clone https://github.com/vanamalix/dan-da-dye && cd dan-da-dye
+scripts/setup.sh ~/dandadye-data --dry-run   # see what it will do; nothing is written
+scripts/setup.sh ~/dandadye-data             # environments + ~90 GB of models, resumable
+export DANDADYE_DATA=~/dandadye-data HF_HOME=~/dandadye-data/hf PATH=~/dandadye-data/.venv/bin:$PATH
+
+# your own pages in $DANDADYE_DATA/work/src/<chapter>/, then:
+dandadye ingest && dandadye status
+dandadye colourise --chapters 150 --pages 1-3 --dry-run   # check before spending GPU time
+dandadye colourise --chapters 150 --pages 1-3             # the slow, warm part
+dandadye inkfix --chapters 150 && dandadye export --chapters 150
+```
+
+`setup.sh` refuses to put anything inside the repo, checks that you are on Apple Silicon, and asks you to log in
+to Hugging Face first (FLUX.2 [klein] is gated: accept its licence on the model page). The manual steps are under
+"Setup" below, for people who enjoy that sort of thing.
+
 ## How it works
 
 ```

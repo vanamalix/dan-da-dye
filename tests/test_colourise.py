@@ -101,3 +101,9 @@ def test_mflux_accepts_the_command(cfg, engine):
     Path(s.lora_path).write_bytes(b"")  # mflux checks the LoRA file exists; it is not loaded
     cmd = build_command(s, Path("/p/page.png"), [Path("/p/ref.png")], Path("/p/out.png"), 832, 1216, "x")
     assert validate_with_mflux(cmd) == ""
+
+
+def test_no_bake_lora_flag(cfg):
+    from types import SimpleNamespace
+    assert Settings.from_config(cfg).bake_lora is True
+    assert Settings.from_config(cfg, SimpleNamespace(no_bake_lora=True)).bake_lora is False

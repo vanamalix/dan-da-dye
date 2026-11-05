@@ -68,6 +68,9 @@ class Settings:
     seed: int = 42
     prompt_extra: str = ""
     low_ram: bool = True
+    # Fold the LoRA into the quantised weights at load time (faster steps). On 16 GB Macs the fold can trip
+    # macOS's GPU watchdog ("GPU Timeout Error"); --no-bake-lora applies the LoRA on the fly instead.
+    bake_lora: bool = True
     mflux_bin: str = ".venv/bin/mflux-generate-flux2-edit"
     hf_home: str = "hf"
 
@@ -108,6 +111,8 @@ class Settings:
                     setattr(s, k, v)
             if getattr(args, "no_quantize", False):
                 s.quantize = None
+            if getattr(args, "no_bake_lora", False):
+                s.bake_lora = False
         for k in ("lora_path", "mflux_bin", "hf_home", "model_path"):
             v = getattr(s, k)
             if v:
@@ -255,7 +260,7 @@ class Engine:
             from mflux.models.flux2.variants import Flux2KleinEdit
             self.model = Flux2KleinEdit(quantize=s.quantize, model_path=s.model_path,
                                         lora_paths=[s.lora_path], lora_scales=[s.lora_scale],
-                                        model_config=model_config)
+                                        bake_lora=s.bake_lora, model_config=model_config)
             # The LoRA prompt is identical for every page: encode it once, then the
             # text encoder can be freed (MemorySaver would otherwise drop it after page 1
             # and break page 2, because Flux2 re-encodes on every call).
@@ -325,7 +330,7 @@ def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, 
         todo.append((key, cid, idx, data, Path(ref), out))
 
     log(f"colourise: {len(todo)} pages to do ({s.engine}, {backend} backend{', dry run' if dry_run else ''})")
-    commands, engine = [], None
+    commands, engine, spent = [], None, 0.0
     in_root = cfg.work / "colourise_in"
     for n, (key, cid, idx, data, ref, out) in enumerate(todo, start=1):
         page_in = in_root / cid / f"{idx:03d}.png"
@@ -357,7 +362,10 @@ def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, 
         rec[s.engine] = {"path": str(out), "seconds": round(dt, 1), "width": width, "height": height,
                          "prompt": prompt, "settings": asdict(s)}
         state.update(key, "colourise", rec)
-        log(f"  [{n}/{len(todo)}] {key} -> {out} in {dt:.0f}s")
+        spent += dt
+        left = (spent / n) * (len(todo) - n)
+        eta = time.strftime("%H:%M", time.localtime(time.time() + left))
+        log(f"  [{n}/{len(todo)}] {key} -> {out} in {dt:.0f}s; about {left / 60:.0f} min left (done ~{eta})")
     if dry_run and commands:
         problem = validate_with_mflux(commands[0])
         log(f"mflux argument check: {problem or 'OK'}")

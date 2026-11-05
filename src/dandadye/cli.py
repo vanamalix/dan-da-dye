@@ -65,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-path", help="local (e.g. pre-quantised) model directory")
     p.add_argument("-q", "--quantize", type=int, choices=[3, 4, 5, 6, 8])
     p.add_argument("--no-quantize", action="store_true")
+    p.add_argument("--no-bake-lora", action="store_true",
+                   help="apply the LoRA on the fly instead of folding it in at load (avoids GPU timeouts on 16 GB Macs)")
     p.add_argument("--steps", type=int)
     p.add_argument("--guidance", type=float)
     p.add_argument("--lora-scale", type=float)

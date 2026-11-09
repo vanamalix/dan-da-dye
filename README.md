@@ -122,6 +122,11 @@ text encoder is then freed. Quantising when the model loads still briefly needs 
 a quantised copy once with `mflux-save --model flux2-klein-base-9b -q 4 --path ...` and passing
 `--model-path` avoids that.
 
+## Development
+
+The stages up to `export` need only Python; `upload` also needs Node and wrangler. Working on this repo also uses the private `@vanamalix/governance` tooling
+(git hooks, privacy scan, gates), which needs Node, pnpm and GitHub Packages access; see `CLAUDE.md`.
+
 ## Adding a series
 
 Copy `presets/dandadan/preset.toml`. Set `series`, `title`, `source_dir`, the filename regexes

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Sensitive paths (vn-sensitive-guard) and a privacy scan of the staged diff (@vanamalix/governance).
+# Sensitive-data preset: the owner installs this once per clone with
+#   pnpm exec vn-sensitive-guard --install-hooks
+# (an untracked, protected copy in <git dir>/vn-hooks, verified by hash before every commit and push).
+# Other apps may still use it from .githooks: git config core.hooksPath .githooks
+# The path check is the backstop behind the Claude Code hook: it sees the real index at commit time.
+# Bypass a reviewed false positive with: git commit --no-verify   (the owner only; say why in the message).
+root=$(git rev-parse --show-toplevel) || exit 1
+bin="$root/node_modules/.bin"
+# Fail closed: a fresh clone without the package must not commit unchecked.
+for tool in vn-sensitive-guard vn-privacy-scan; do
+  if [ ! -x "$bin/$tool" ]; then
+    echo "pre-commit: $tool is not installed, so the checks cannot run. Run: pnpm install" >&2
+    echo "  (a reviewed exception: git commit --no-verify, and say why in the message)" >&2
+    exit 1
+  fi
+done
+"$bin/vn-sensitive-guard" --git-pre-commit || exit 1
+exec "$bin/vn-privacy-scan" --staged

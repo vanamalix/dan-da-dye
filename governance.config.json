@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "app": "dan-da-dye",
+  "docs": "docs/governance",
+  "privacy": { "patterns": ".privacy-patterns", "allow": ".privacy-allow", "denylist": ".ship-denylist" },
+  "runtimeData": [".env", ".dev.vars", "data/", "work/", "out/", "output/", "outputs/", "export/", "models/", "lora/", "palette/img/", "hf/"],
+  "rollout": { "mode": "production-live" },
+  "sensitive": {
+    "label": "manga pages, coloured output, art or model weights",
+    "paths": ["data/**", "work/**", "out/**", "output/**", "outputs/**", "export/**", "models/**", "lora/**", "palette/img/**", "hf/**"],
+    "fileTypes": ["jpg", "jpeg", "png", "webp", "gif", "jfif", "bmp", "tif", "tiff", "avif", "heic", "cbz", "cbr", "zip", "pdf", "safetensors", "bin", "ckpt", "pt", "pth", "gguf", "onnx", "h5", "npy", "npz", "sqlite", "sqlite3", "db"]
+  },
+  "gates": [
+    { "name": "privacy", "description": "privacy and secret scan of every tracked file", "quick": true, "always": true, "run": "node_modules/.bin/vn-privacy-scan --tracked" },
+    { "name": "shell", "description": "shell scripts parse", "quick": true, "builtin": "shell_syntax", "paths": ["**/*.sh", ".githooks/**"] },
+    { "name": "runtime-data", "description": "runtime data stays untracked and ignored", "quick": true, "always": true, "builtin": "runtime_data_ignored" },
+    { "name": "no-media", "description": "no page, art or weight file is tracked", "quick": true, "always": true, "run": "! git ls-files -z | tr '\\0' '\\n' | grep -Ei '\\.(jpe?g|png|webp|gif|jfif|bmp|tiff?|avif|heic|cbz|cbr|zip|pdf|safetensors|bin|ckpt|pt|pth|gguf|onnx|h5|npy|npz|sqlite3?|db)$'" },
+    { "name": "tests", "description": "pytest on synthetic pages (needs .venv: pnpm setup:dev)", "quick": true, "always": true, "run": "test -x .venv/bin/python || exit 77; .venv/bin/python -m pytest -q" }
+  ],
+  "tiers": {
+    "default": "T2",
+    "levels": [
+      { "id": "T0", "title": "docs", "paths": ["**/*.md", "docs/**"], "gates": ["privacy"], "componentGates": false, "testsFirst": false, "review": "none", "rollout": "none", "approvals": [] },
+      { "id": "T1", "title": "presets", "paths": ["presets/**"], "gates": ["privacy"], "componentGates": true, "testsFirst": false, "review": "self", "rollout": "none", "approvals": [] },
+      { "id": "T2", "title": "pipeline logic and tooling", "paths": [], "gates": ["privacy"], "componentGates": true, "testsFirst": true, "review": "independent", "rollout": "none", "approvals": [] },
+      { "id": "T3", "title": "the R2 publisher, gates and repo controls", "paths": ["src/dandadye/export.py", "src/dandadye/cli.py", "scripts/setup.sh", ".gitignore", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".github/**", ".githooks/**", ".claude/**", "CLAUDE.md", "governance.config.json", ".privacy-patterns", ".privacy-allow"], "gates": ["privacy"], "componentGates": true, "testsFirst": true, "review": "independent", "rollout": "standard", "approvals": ["r2-publish"] }
+    ]
+  },
+  "review": { "fromTier": "T3", "trailers": ["Reviewed-by:", "Tier: T3 reviewed"], "enforcement": "warn" },
+  "approvals": [ { "id": "r2-publish", "action": "real R2 upload (dandadye upload --yes), secret, Access, DNS or route change", "who": "owner" } ],
+  "forbidden": ["force-push to main", "commit a page, coloured output, art or model weights", "write into the hub or another app's repo", "upload with --allow-removal without the owner's OK"]
+}

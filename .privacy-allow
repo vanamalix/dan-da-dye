@@ -1,0 +1,8 @@
+# Reviewed false positives for `vn-privacy-scan --tracked` only. Never list a real secret here; fix the file instead.
+# One entry per line (comments and blank lines ignored):
+#   path<TAB>exact full line text   that line of that file, wherever it moves (the text must match exactly,
+#                                   so anything appended later is scanned again)
+#   path<TAB>*                      that whole file (a synthetic fixture), matched on the path only;
+#                                   if the file is gone it matches nothing (stale), never anything else
+# Older free-text entries (no tab) still work as substrings of "path:line:text" but print a deprecation warning,
+# and an entry that matches nothing prints a "stale" warning.

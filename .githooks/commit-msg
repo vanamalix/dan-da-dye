@@ -1,0 +1,19 @@
+#!/bin/sh
+# Commit message checks (@vanamalix/governance).
+# 1. CI skip markers are refused: [skip ci], [ci skip], [no ci], [skip actions], [actions skip] and a
+#    "skip-checks: true" trailer make GitHub skip push workflows, including the server-side
+#    sensitive-path scan. The owner can bypass with --no-verify.
+# 2. Risk tier (docs/governance/TIERS.md): a commit touching tier review.fromTier files without a review
+#    trailer gets a WARNING while governance.config.json review.enforcement is "warn", and is refused only
+#    under "block". A missing node or vn-tier never blocks a commit.
+if grep -Eiq '\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|^[[:space:]]*skip-checks[[:space:]]*:[[:space:]]*true' "$1"; then
+  echo "commit-msg: the message carries a CI skip marker, which would skip the server-side sensitive-path scan. Remove it." >&2
+  exit 1
+fi
+root=$(git rev-parse --show-toplevel) || exit 0
+tier="$root/node_modules/.bin/vn-tier"
+[ -x "$tier" ] || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+"$tier" --hook --staged --msg-file "$1"
+[ $? -eq 1 ] && exit 1
+exit 0

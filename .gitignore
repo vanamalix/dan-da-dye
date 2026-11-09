@@ -22,10 +22,20 @@ hf/
 *.bmp
 *.tif
 *.tiff
+*.avif
+*.heic
+*.cbz
+*.cbr
+*.zip
+*.pdf
 *.safetensors
 *.bin
 *.ckpt
 *.pt
+*.pth
+*.gguf
+*.onnx
+*.h5
 *.npy
 *.npz
 
@@ -45,3 +55,9 @@ dist/
 
 # Claude Code subagent worktrees
 .claude/worktrees/
+
+# Governance tooling
+node_modules/
+.ship-denylist
+.env
+.dev.vars

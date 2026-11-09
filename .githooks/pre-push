@@ -1,0 +1,15 @@
+#!/bin/sh
+# Sensitive paths, CI skip markers and force pushes in what is pushed (vn-sensitive-guard,
+# @vanamalix/governance). The owner installs it once per clone with
+#   pnpm exec vn-sensitive-guard --install-hooks
+# (an untracked, protected copy in <git dir>/vn-hooks, verified by hash before every commit and push).
+# It checks the commits git is really about to send, however they were made (plumbing, scripts, another
+# tool), against what the URL being pushed to (git's second argument) really has. The owner can bypass
+# with: git push --no-verify
+root=$(git rev-parse --show-toplevel) || exit 1
+guard="$root/node_modules/.bin/vn-sensitive-guard"
+if [ ! -x "$guard" ]; then
+  echo "pre-push: vn-sensitive-guard is not installed, so the check cannot run. Run: pnpm install" >&2
+  exit 1
+fi
+exec "$guard" --git-pre-push "$1" "$2"

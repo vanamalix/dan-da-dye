@@ -1,0 +1,24 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@vanamalix/governance':
+        specifier: 0.4.0
+        version: 0.4.0
+
+packages:
+
+  '@vanamalix/governance@0.4.0':
+    resolution: {integrity: sha512-CxDYRhSj+I1fFFZqMd+W53jXTrV+t+dz7+PU26BV+g5EaMfPj/tAUXmEfgiYMhgJYtHz4H+wHK8Ac8nB+fE79w==, tarball: https://npm.pkg.github.com/download/@vanamalix/governance/0.4.0/ae9a9281ca71e41c4e53051e3f85fa4741c98373}
+    engines: {node: '>=20'}
+    hasBin: true
+
+snapshots:
+
+  '@vanamalix/governance@0.4.0': {}

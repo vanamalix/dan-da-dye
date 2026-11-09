@@ -1,0 +1,16 @@
+{
+  "name": "dan-da-dye-governance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Governance tooling only (hooks, gates, privacy scan). The pipeline itself is the Python package in pyproject.toml.",
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "setup:dev": "python3.12 -m venv .venv && .venv/bin/pip install -q -e '.[dev]'",
+    "test": ".venv/bin/python -m pytest -q",
+    "check": "vn-tier --check-config && pnpm test",
+    "gates": "vn-compliance --quick"
+  },
+  "devDependencies": {
+    "@vanamalix/governance": "0.4.0"
+  }
+}

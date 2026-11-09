@@ -1,0 +1,10 @@
+# Privacy scan patterns (vn-privacy-scan). One "key regex" per line; extended regex (grep -E, awk).
+# Every key is required; the scan refuses to run (exit 2) on a missing key or a regex that does not
+# compile, and a built-in self-test checks they still bite. Write a meaningful trailing space as [ ].
+# A starting point: tighten it for your repo (sleep keeps a stricter file).
+secret-vendor (AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{60,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{16,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|svs_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})
+secret-assign (api[_-]?key|secret|token|passw(or)?d|private[_-]?key|client[_-]?secret|auth[_-]?token)[A-Za-z0-9_]*["']?[[:space:]]*[:=]
+secret-assign-value [:=][[:space:]]*(["'][^"'[:space:]]{8,}["']|[A-Za-z0-9_+/-]*[0-9][A-Za-z0-9_+/-]{7,})([[:space:];,]|$)
+secret-ignore (example|placeholder|dummy|changeme|your[_-]|xxxx|\.\.\.|<[^>]*>|\$\{)
+phone (^|[^0-9])(\+?64[ -]?|0)(2[0-9]|[3-79])[ -]?[0-9]{3}[ -]?[0-9]{3,5}
+phone-fake (555|000 ?000|example|fake|placeholder)

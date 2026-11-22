@@ -51,10 +51,7 @@ esac
 run() { if [ "$DRY" = 1 ]; then printf '  would run:'; printf ' %q' "$@"; echo; else "$@"; fi; }
 say() { printf '\n== %s\n' "$*"; }
 
-# Current PyTorch wheel indexes with cp312 wheels for torch and torchvision (checked 22 Nov 2026).
-ROCM_INDEX="https://download.pytorch.org/whl/rocm7.2"
-CUDA_INDEX="https://download.pytorch.org/whl/cu126"
-CPU_INDEX="https://download.pytorch.org/whl/cpu"
+. "$REPO/scripts/torch-index.sh"
 TORCH_INSTALL=()     # extra pip step on Linux: torch + torchvision from the chosen index
 INHIBIT=()           # keeps the machine awake during downloads, where the OS offers a way
 
@@ -86,21 +83,7 @@ elif [ "$OS" = Linux ]; then
   command -v systemd-inhibit >/dev/null 2>&1 && INHIBIT=(systemd-inhibit --what=idle:sleep --who=dandadye --why="downloading models")
   free_gb() { df -BG --output=avail "$1" | awk 'NR==2{gsub("G","",$1); print $1}'; }
 
-  has_amd() { [ -e /dev/kfd ] || { command -v rocminfo >/dev/null 2>&1 && rocminfo >/dev/null 2>&1; }; }
-  has_nvidia() { command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; }
-  if [ "$TORCH" = auto ]; then
-    if has_amd; then TORCH=rocm; elif has_nvidia; then TORCH=cuda; else TORCH=cpu; fi
-    echo "  torch build: $TORCH (auto-detected; override with --torch rocm|cuda|cpu)"
-  else
-    echo "  torch build: $TORCH (from --torch)"
-  fi
-  case "$TORCH" in
-    rocm) TORCH_URL="$ROCM_INDEX" ;;
-    cuda) TORCH_URL="$CUDA_INDEX" ;;
-    cpu)  TORCH_URL="$CPU_INDEX" ;;
-  esac
-  TORCH_URL="${TORCH_INDEX_URL:-$TORCH_URL}"
-  echo "  torch index: $TORCH_URL"
+  resolve_torch "$TORCH"
   TORCH_INSTALL=(install -q torch torchvision --index-url "$TORCH_URL")
   if [ "$TORCH" = rocm ] && command -v rocminfo >/dev/null 2>&1 && rocminfo 2>/dev/null | grep -q gfx1030; then
     echo "  note: gfx1030 (RDNA2, e.g. Radeon PRO W6800) is supported by the ROCm wheels as is. Only if torch reports"

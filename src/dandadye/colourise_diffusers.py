@@ -58,6 +58,7 @@ import gc
 import inspect
 import json
 import os
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -181,38 +182,70 @@ def check_call(engine: str, call: dict) -> str:
 CHUNK_BYTES = 1 << 30  # score matrix budget per chunk (bytes), well under a 32 GB card's headroom
 
 
-def chunked_sdpa(torch, real, q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
+def chunked_sdpa(torch, real, query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
     """Exact scaled-dot-product attention in query chunks, for builds with no fused kernel.
 
     The ROCm wheel has no flash or memory-efficient kernel for gfx1030, so PyTorch falls back to the
     math path, which builds the whole (heads x tokens x tokens) score matrix: about 20 GB for a
     one-megapixel page plus two references. Splitting the queries gives the same result in bounded memory.
     """
-    if q.dim() != 4 or is_causal or dropout_p:
-        return real(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kw)
-    b, h, n, _ = q.shape
-    step = max(1, CHUNK_BYTES // max(1, b * h * k.shape[2] * 4))
+    if query.dim() != 4 or is_causal or dropout_p:
+        return real(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kw)
+    b, h, n, _ = query.shape
+    step = max(1, CHUNK_BYTES // max(1, b * h * key.shape[2] * 4))
     if step >= n:
-        return real(q, k, v, attn_mask=attn_mask, scale=scale, **kw)
+        return real(query, key, value, attn_mask=attn_mask, scale=scale, **kw)
     out = []
     for i in range(0, n, step):
         m = attn_mask
         if m is not None and m.dim() >= 3 and m.shape[-2] == n:
             m = m[..., i:i + step, :]
-        out.append(real(q[:, :, i:i + step], k, v, attn_mask=m, scale=scale, **kw))
+        out.append(real(query[:, :, i:i + step], key, value, attn_mask=m, scale=scale, **kw))
     return torch.cat(out, dim=2)
 
 
+# ROCm architectures the PyTorch wheels ship fused (aotriton) attention kernels for. Probing an unsupported
+# card is not safe: PyTorch tries a kernel built for another architecture and the GPU faults.
+ROCM_FUSED_ATTENTION = {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150",
+                        "gfx1151", "gfx1200", "gfx1201"}
+
+
 def fused_attention_available(torch) -> bool:
-    """True when PyTorch has a flash or memory-efficient SDPA kernel for the current device."""
+    """True when PyTorch is expected to have a flash or memory-efficient SDPA kernel for the current device."""
+    if not getattr(torch.version, "hip", None):
+        return True  # CUDA builds always have them
     try:
-        from torch.nn.attention import SDPBackend, sdpa_kernel
-        q = torch.zeros(1, 2, 64, 64, device="cuda", dtype=torch.bfloat16)
-        with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
-            torch.nn.functional.scaled_dot_product_attention(q, q, q)
-        return True
+        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
     except Exception:
         return False
+    return arch in ROCM_FUSED_ATTENTION
+
+
+FP16_MAX = 65504.0
+
+
+def scoped_fp16_linears(torch, transformer) -> int:
+    """Run the attention and feed-forward Linears of the transformer blocks in fp16, the rest in bf16.
+
+    RDNA2 (gfx1030) has packed fp16 maths but no bf16 matrix path, so bf16 GEMMs run about 3.5 times slower
+    than fp16 there. Full fp16 gives black images because Klein's residual stream reaches about 1e5, so only
+    the Linear inputs and outputs are cast (and clipped to the fp16 range); residual adds, modulation, norms
+    and the VAE keep the model dtype. Returns the number of Linears converted.
+    """
+    class _Fp16Linear(torch.nn.Linear):
+        def forward(self, x):
+            dt = x.dtype
+            y = torch.nn.functional.linear(x.clamp(-FP16_MAX, FP16_MAX).to(torch.float16), self.weight, self.bias)
+            return y.clamp_(-FP16_MAX, FP16_MAX).to(dt)
+
+    n = 0
+    for blocks in ("transformer_blocks", "single_transformer_blocks"):
+        for name, m in getattr(transformer, blocks, torch.nn.ModuleList()).named_modules():
+            if type(m) is torch.nn.Linear and "norm" not in name:
+                m.to(torch.float16)
+                m.__class__ = _Fp16Linear
+                n += 1
+    return n
 
 
 class DiffusersEngine:
@@ -233,6 +266,9 @@ class DiffusersEngine:
         self.pipe = pipe if pipe is not None else self._load(resolve_repo(s))
         if s.engine == "flux2-lora":
             self._setup_flux2()
+        if getattr(s, "fp16_linears", False) and s.engine == "flux2-lora" and self.choice.is_gpu:
+            n = scoped_fp16_linears(torch, self.pipe.transformer)
+            self.log(f"  note: {n} attention/feed-forward Linears run in fp16 (clipped), everything else in {self.choice.dtype}")
         self._place()
         self._attention_patch()
 
@@ -321,6 +357,19 @@ class DiffusersEngine:
         if self.choice.device.startswith("cuda"):
             self.torch.cuda.empty_cache()
 
+    def _step_logger(self, total: int):
+        """Per-step progress line (tqdm does not reach a piped log), with seconds per step."""
+        import time
+        t0 = time.time()
+
+        def cb(pipe, i, t, kwargs):
+            n, dt = i + 1, time.time() - t0
+            if n == 1 or n % 5 == 0 or n == total:
+                self.log(f"  step {n}/{total}: {dt / n:.1f}s/step, {dt:.0f}s elapsed")
+                sys.stdout.flush()
+            return kwargs
+        return cb
+
     def generate(self, page_in: Path, refs: list[Path], out: Path, width: int, height: int, prompt: str) -> None:
         s = self.s
         images = []
@@ -337,6 +386,7 @@ class DiffusersEngine:
                       num_inference_steps=s.steps, guidance_scale=guidance_scale(s), generator=generator)
             if neg is not None:
                 kw["negative_prompt_embeds"] = neg
+            kw["callback_on_step_end"] = self._step_logger(s.steps)
             image = self.pipe(**kw).images[0]
         out.parent.mkdir(parents=True, exist_ok=True)
         image.save(out)

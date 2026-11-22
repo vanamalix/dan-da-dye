@@ -67,3 +67,13 @@ def test_device_module_needs_no_torch(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(device)
+
+
+def test_magi_worker_defines_each_function_once():
+    """A second pick_device later in the file silently replaced the cuda-aware one (and needed an unimported torch)."""
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src/dandadye/detect/worker_magi_v2.py"
+    names = [n.name for n in ast.parse(src.read_text()).body if isinstance(n, ast.FunctionDef)]
+    assert len(names) == len(set(names)), sorted({n for n in names if names.count(n) > 1})

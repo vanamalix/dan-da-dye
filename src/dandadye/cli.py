@@ -78,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--guidance", type=float)
     p.add_argument("--lora-scale", type=float)
     p.add_argument("--megapixels", type=float, help="working resolution of the page (default 1.0)")
+    p.add_argument("--ref-megapixels", type=float,
+                   help="size of the reference sheet (default: same as --megapixels); smaller is much faster")
+    p.add_argument("--fp16-linears", action=argparse.BooleanOptionalAction, default=None,
+                   help="diffusers on a GPU: run attention/feed-forward Linears in fp16 (much faster on AMD RDNA2)")
     p.add_argument("--seed", type=int)
     p.add_argument("--prompt-extra")
     p.add_argument("--low-ram", action=argparse.BooleanOptionalAction, default=None)

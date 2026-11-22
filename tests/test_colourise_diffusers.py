@@ -275,3 +275,31 @@ def test_chunked_sdpa_matches_full_attention(monkeypatch):
         want = real(q, k, v, attn_mask=m)
         got = cd.chunked_sdpa(torch, real, q, k, v, attn_mask=m)
         assert torch.allclose(want, got, atol=1e-5)
+
+
+def test_scoped_fp16_linears_close_to_reference():
+    torch = pytest.importorskip("torch")
+    from dandadye import colourise_diffusers as cd
+
+    class Blk(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.norm = torch.nn.Linear(8, 8)
+            self.ff = torch.nn.Linear(8, 8)
+
+    class T(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.transformer_blocks = torch.nn.ModuleList([Blk()])
+            self.single_transformer_blocks = torch.nn.ModuleList([Blk()])
+
+    t = T()
+    x = torch.randn(2, 8)
+    ref = t.transformer_blocks[0].ff(x)
+    n = cd.scoped_fp16_linears(torch, t)
+    got = t.transformer_blocks[0].ff(x)
+    assert n == 2  # the "norm" Linears are left alone
+    assert got.dtype == torch.float32 and torch.allclose(ref, got, atol=1e-2)
+    assert t.transformer_blocks[0].norm.weight.dtype == torch.float32
+    big = torch.full((1, 8), 1e9)
+    assert torch.isfinite(t.transformer_blocks[0].ff(big)).all()

@@ -67,12 +67,6 @@ def use_native_solver():
         pass
 
 
-def pick_device(name):
-    if name == "auto":
-        return "mps" if torch.backends.mps.is_available() else "cpu"
-    return name
-
-
 def run(job, device):
     import torch
     from transformers import AutoConfig, AutoModel

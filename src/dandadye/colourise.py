@@ -97,6 +97,11 @@ class Settings:
     lora_path: str = "lora/manga-colorization/manga_colorization.safetensors"
     lora_scale: float = 0.9
     megapixels: float = 1.0
+    # Reference sheet size, if smaller than the page. Each reference adds as many tokens as the page, and
+    # cost grows with the square of the token count in attention; None = same as the page.
+    ref_megapixels: float | None = None
+    # diffusers on a GPU: attention/feed-forward Linears in fp16 (big win on RDNA2, which has no bf16 matrix path).
+    fp16_linears: bool = False
     seed: int = 42
     prompt_extra: str = ""
     low_ram: bool = True
@@ -142,7 +147,7 @@ class Settings:
                 setattr(s, k, v)
         if args is not None:
             for k in ("model", "model_path", "quantize", "steps", "guidance", "lora_scale",
-                      "megapixels", "seed", "prompt_extra", "low_ram", "device", "dtype"):
+                      "megapixels", "ref_megapixels", "seed", "prompt_extra", "low_ram", "fp16_linears", "device", "dtype"):
                 v = getattr(args, k, None)
                 if v is not None:
                     setattr(s, k, v)
@@ -396,7 +401,7 @@ def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, 
             refs = solo_sheets(cfg, names, s.max_refs, build=not dry_run) or [ref]
             prompt = flux3_prompt(cfg, names if refs != [ref] else [], s.prompt_extra)
         else:
-            refs = [ref if dry_run else prepare_reference(ref, in_root / "refs" / ref.name, s.megapixels)]
+            refs = [ref if dry_run else prepare_reference(ref, in_root / "refs" / ref.name, s.ref_megapixels or s.megapixels)]
             prompt = s.prompt
         if diffusers:
             plan = cd.page_plan(s, choice, key, page_in, refs, out, width, height, prompt)

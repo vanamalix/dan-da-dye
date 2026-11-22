@@ -178,6 +178,43 @@ def check_call(engine: str, call: dict) -> str:
     return f"unknown arguments: {', '.join(unknown)}" if unknown else ""
 
 
+CHUNK_BYTES = 1 << 30  # score matrix budget per chunk (bytes), well under a 32 GB card's headroom
+
+
+def chunked_sdpa(torch, real, q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kw):
+    """Exact scaled-dot-product attention in query chunks, for builds with no fused kernel.
+
+    The ROCm wheel has no flash or memory-efficient kernel for gfx1030, so PyTorch falls back to the
+    math path, which builds the whole (heads x tokens x tokens) score matrix: about 20 GB for a
+    one-megapixel page plus two references. Splitting the queries gives the same result in bounded memory.
+    """
+    if q.dim() != 4 or is_causal or dropout_p:
+        return real(q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kw)
+    b, h, n, _ = q.shape
+    step = max(1, CHUNK_BYTES // max(1, b * h * k.shape[2] * 4))
+    if step >= n:
+        return real(q, k, v, attn_mask=attn_mask, scale=scale, **kw)
+    out = []
+    for i in range(0, n, step):
+        m = attn_mask
+        if m is not None and m.dim() >= 3 and m.shape[-2] == n:
+            m = m[..., i:i + step, :]
+        out.append(real(q[:, :, i:i + step], k, v, attn_mask=m, scale=scale, **kw))
+    return torch.cat(out, dim=2)
+
+
+def fused_attention_available(torch) -> bool:
+    """True when PyTorch has a flash or memory-efficient SDPA kernel for the current device."""
+    try:
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+        q = torch.zeros(1, 2, 64, 64, device="cuda", dtype=torch.bfloat16)
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
+            torch.nn.functional.scaled_dot_product_attention(q, q, q)
+        return True
+    except Exception:
+        return False
+
+
 class DiffusersEngine:
     """Keeps one diffusers pipeline in memory for a batch of pages (mirrors ``colourise.Engine``)."""
 
@@ -197,6 +234,19 @@ class DiffusersEngine:
         if s.engine == "flux2-lora":
             self._setup_flux2()
         self._place()
+        self._attention_patch()
+
+    def _attention_patch(self) -> None:
+        """Swap in chunked attention on a GPU with no fused kernel (override: DANDADYE_CHUNKED_ATTENTION=0|1)."""
+        torch = self.torch
+        force = os.environ.get("DANDADYE_CHUNKED_ATTENTION")
+        want = force == "1" or (force != "0" and self.choice.is_gpu and not fused_attention_available(torch))
+        if not want:
+            return
+        real = torch.nn.functional.scaled_dot_product_attention
+        torch.nn.functional.scaled_dot_product_attention = (
+            lambda *a, **kw: chunked_sdpa(torch, real, *a, **kw))
+        self.log("  note: no fused attention kernel on this device, using chunked attention (same result, bounded memory)")
 
     @property
     def device_info(self) -> dict:
@@ -248,8 +298,9 @@ class DiffusersEngine:
             raise RuntimeError("the text encoder was freed after the first prompt (--low-ram); "
                                "this engine expects one fixed prompt per batch")
         device = pipe._execution_device
-        pos, _ = pipe.encode_prompt(prompt=prompt, device=device)
-        neg = pipe.encode_prompt(prompt="", device=device)[0] if self.cfg else None
+        with self.torch.no_grad():  # without this the autograd graph pins the encoder weights on the card
+            pos, _ = pipe.encode_prompt(prompt=prompt, device=device)
+            neg = pipe.encode_prompt(prompt="", device=device)[0] if self.cfg else None
         self._embeds[prompt] = (pos, neg)
         if self.s.low_ram:
             self._free_text_encoder()
@@ -257,9 +308,14 @@ class DiffusersEngine:
 
     def _free_text_encoder(self) -> None:
         pipe = self.pipe
-        pipe.text_encoder = None
-        if self.offload:  # the offload hook chain still references the encoder
+        if self.offload:  # the offload hooks still hold the encoder (and may leave it on the GPU)
             pipe.remove_all_hooks()
+        enc = pipe.text_encoder
+        if enc is not None and self.choice.is_gpu:
+            enc.to("cpu")  # off the card before the 9B transformer needs the room
+        pipe.text_encoder = None
+        del enc
+        if self.offload:
             pipe.enable_model_cpu_offload(device=self.choice.device)
         gc.collect()
         if self.choice.device.startswith("cuda"):

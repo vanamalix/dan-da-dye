@@ -259,3 +259,19 @@ def test_tiny_pipeline_without_lora_differs_from_with(tiny, tmp_path, monkeypatc
         eng.generate(page, [ref], out, 64, 96, s.prompt)
         outs.append(Image.open(out).tobytes())
     assert outs[0] != outs[1]
+
+
+def test_chunked_sdpa_matches_full_attention(monkeypatch):
+    torch = pytest.importorskip("torch")
+    from dandadye import colourise_diffusers as cd
+
+    monkeypatch.setattr(cd, "CHUNK_BYTES", 4 * 2 * 40 * 4 * 5)  # forces several chunks
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 40, 8, generator=g) for _ in range(3))
+    mask = torch.rand(1, 1, 40, 40, generator=g) > 0.2
+    mask[..., 0] = True
+    real = torch.nn.functional.scaled_dot_product_attention
+    for m in (None, mask):
+        want = real(q, k, v, attn_mask=m)
+        got = cd.chunked_sdpa(torch, real, q, k, v, attn_mask=m)
+        assert torch.allclose(want, got, atol=1e-5)

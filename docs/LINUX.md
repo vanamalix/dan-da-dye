@@ -110,7 +110,7 @@ default if it doesn't. On Linux aarch64 pulp has no bundled CBC, so `highspy` ma
 | torch wheels | PyPI (MPS build) | `download.pytorch.org/whl/rocm7.2`, `/cu126` or `/cpu`, chosen by `--torch`, installed into both venvs before other packages | `scripts/setup.sh` |
 | Main venv extras | `.[mlx,dev]` | `.[diffusers,dev]` | `scripts/setup.sh` |
 | Pulp solver | HiGHS (CBC is x86-only on macOS) | HiGHS when present, bundled CBC otherwise | `worker_magi_v2.py` |
-| Colour engine | mflux / MLX | diffusers (**placeholder, to be filled in from the colourise notes**) | `src/dandadye/colourise.py` |
+| Colour engine | mflux / MLX | diffusers (`Flux2KleinPipeline` plus the manga LoRA, chosen with `--runtime diffusers`, the default off macOS). Same flow: page then reference sheet as the two images, real CFG on the base model, LoRA fused at load. `-q` has no diffusers equivalent and is ignored with a note; `--backend cli` is mflux only; seeds do not give the same noise as MLX | `src/dandadye/colourise_diffusers.py` |
 
 ## What hasn't been tested
 

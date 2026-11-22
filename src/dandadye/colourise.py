@@ -24,12 +24,31 @@ Two engines (pick with ``--engine``, compare A/B; outputs go to
 
 Two backends: ``api`` loads the model once and loops over pages; ``cli`` runs one
 mflux process per page. ``--dry-run`` only prints the equivalent CLI commands.
+
+Two runtimes (``--runtime``, separate from ``--backend``):
+
+``mlx`` - mflux on Apple Silicon, everything above. ``diffusers`` - PyTorch +
+  diffusers on Linux (ROCm or NVIDIA through ``torch.cuda``) with CPU fallback;
+  see ``colourise_diffusers`` for how each setting maps across. ``auto`` (the CLI
+  default) picks mlx on macOS arm64 and diffusers anywhere else
+  (``pick_runtime``). ``Settings.from_config`` without CLI arguments keeps mlx,
+  so the Python API behaves as before. Under diffusers:
+
+  * ``--backend cli`` is refused (there is no per-page diffusers process);
+  * ``--dry-run`` prints the load summary (model repo, LoRA and scale, device,
+    dtype, offload, notes) and one JSON line per page with the exact pipeline
+    keywords (image order, prompt, sizes, steps, guidance), then checks those
+    names against the installed diffusers, the way the mlx dry run checks argv
+    with mflux's parser;
+  * outputs and state records are the same as with mlx; every record also gets
+    ``runtime`` and ``device`` (plus ``dtype`` and ``device_detail`` under diffusers).
 """
 
 from __future__ import annotations
 
 import gc
 import os
+import platform
 import re
 import shlex
 import subprocess
@@ -45,6 +64,19 @@ from .refsheet import cast_strip, load_palette, snap16
 from .state import State
 
 TRIGGER = "mngclranm"
+RUNTIMES = ("auto", "mlx", "diffusers")
+
+
+def pick_runtime(requested: str | None = "auto", system: str | None = None, machine: str | None = None) -> str:
+    """'auto' -> mlx on macOS arm64, diffusers elsewhere. Explicit choices are kept as given."""
+    req = requested or "auto"
+    if req not in RUNTIMES:
+        raise ValueError(f"unknown runtime {requested!r} (expected one of {', '.join(RUNTIMES)})")
+    if req != "auto":
+        return req
+    system = platform.system() if system is None else system
+    machine = platform.machine() if machine is None else machine
+    return "mlx" if system == "Darwin" and machine in ("arm64", "aarch64") else "diffusers"
 
 ENGINES = {
     "flux2-lora": dict(model="flux2-klein-base-9b", steps=50, guidance=4.0, quantize=4,
@@ -73,6 +105,10 @@ class Settings:
     bake_lora: bool = True
     mflux_bin: str = ".venv/bin/mflux-generate-flux2-edit"
     hf_home: str = "hf"
+    # mlx (mflux) or diffusers (torch). The CLI resolves --runtime auto per platform; the API default stays mlx.
+    runtime: str = "mlx"
+    device: str = "auto"   # diffusers only: auto | cuda | rocm | mps | cpu
+    dtype: str = "auto"    # diffusers only: auto | bf16 | fp16 | fp32
 
     @property
     def uses_lora(self) -> bool:
@@ -88,7 +124,8 @@ class Settings:
         return f"{TRIGGER}, {self.prompt_extra}" if self.prompt_extra else TRIGGER
 
     @classmethod
-    def from_config(cls, cfg: Config, args=None, engine: str | None = None) -> "Settings":
+    def from_config(cls, cfg: Config, args=None, engine: str | None = None,
+                    runtime: str | None = None) -> "Settings":
         engine = engine or getattr(args, "engine", None) or "flux2-lora"
         s = cls(engine=engine)
         names = {f.name for f in fields(cls)}
@@ -105,7 +142,7 @@ class Settings:
                 setattr(s, k, v)
         if args is not None:
             for k in ("model", "model_path", "quantize", "steps", "guidance", "lora_scale",
-                      "megapixels", "seed", "prompt_extra", "low_ram"):
+                      "megapixels", "seed", "prompt_extra", "low_ram", "device", "dtype"):
                 v = getattr(args, k, None)
                 if v is not None:
                     setattr(s, k, v)
@@ -113,6 +150,7 @@ class Settings:
                 s.quantize = None
             if getattr(args, "no_bake_lora", False):
                 s.bake_lora = False
+        s.runtime = pick_runtime(runtime or getattr(args, "runtime", None) or s.runtime)
         for k in ("lora_path", "mflux_bin", "hf_home", "model_path"):
             v = getattr(s, k)
             if v:
@@ -313,7 +351,15 @@ def colour_dir(cfg: Config, engine: str) -> Path:
 
 def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, s: Settings,
         dry_run: bool = False, backend: str = "api", force: bool = False,
-        include_skipped: bool = False, log=print) -> list[list[str]]:
+        include_skipped: bool = False, log=print) -> list[list[str]] | list[dict]:
+    """Colourise pages. Returns the mflux argv per page (mlx) or the diffusers plan per page."""
+    diffusers = s.runtime == "diffusers"
+    choice = None
+    if diffusers:
+        from . import colourise_diffusers as cd
+        from .device import choose
+        cd.check_supported(s, backend)
+        choice = choose(s.device, s.dtype)
     todo = []
     for key, cid, idx, data in state.pages(chapters):
         if pages and idx not in pages:
@@ -329,7 +375,13 @@ def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, 
             continue
         todo.append((key, cid, idx, data, Path(ref), out))
 
-    log(f"colourise: {len(todo)} pages to do ({s.engine}, {backend} backend{', dry run' if dry_run else ''})")
+    if diffusers:
+        log(f"colourise: {len(todo)} pages to do ({s.engine}, diffusers runtime{', dry run' if dry_run else ''})")
+        if dry_run and todo:
+            for line in cd.format_load(cd.load_summary(s, choice)):
+                log(line)
+    else:
+        log(f"colourise: {len(todo)} pages to do ({s.engine}, {backend} backend{', dry run' if dry_run else ''})")
     commands, engine, spent = [], None, 0.0
     in_root = cfg.work / "colourise_in"
     for n, (key, cid, idx, data, ref, out) in enumerate(todo, start=1):
@@ -346,27 +398,43 @@ def run(cfg: Config, state: State, chapters: list[str], pages: set[int] | None, 
         else:
             refs = [ref if dry_run else prepare_reference(ref, in_root / "refs" / ref.name, s.megapixels)]
             prompt = s.prompt
-        cmd = build_command(s, page_in, refs, out, width, height, prompt)
-        commands.append(cmd)
-        if dry_run:
-            log(shlex.join(cmd))
-            continue
+        if diffusers:
+            plan = cd.page_plan(s, choice, key, page_in, refs, out, width, height, prompt)
+            commands.append(plan)
+            if dry_run:
+                log(cd.format_plan(plan))
+                continue
+        else:
+            cmd = build_command(s, page_in, refs, out, width, height, prompt)
+            commands.append(cmd)
+            if dry_run:
+                log(shlex.join(cmd))
+                continue
         t0 = time.time()
-        if backend == "cli":
+        if diffusers:
+            engine = engine or cd.DiffusersEngine(s, log, choice=choice)
+            engine.generate(page_in, refs, out, width, height, prompt)
+            where = engine.device_info
+        elif backend == "cli":
             subprocess.run(cmd, check=True, env={**os.environ, "HF_HOME": s.hf_home})
+            where = {"device": "metal"}
         else:
             engine = engine or Engine(s, log)
             engine.generate(page_in, refs, out, width, height, prompt)
+            where = {"device": "metal"}
         dt = time.time() - t0
         rec = dict(data.get("colourise", {}))
         rec[s.engine] = {"path": str(out), "seconds": round(dt, 1), "width": width, "height": height,
-                         "prompt": prompt, "settings": asdict(s)}
+                         "prompt": prompt, "settings": asdict(s), "runtime": s.runtime, **where}
         state.update(key, "colourise", rec)
         spent += dt
         left = (spent / n) * (len(todo) - n)
         eta = time.strftime("%H:%M", time.localtime(time.time() + left))
         log(f"  [{n}/{len(todo)}] {key} -> {out} in {dt:.0f}s; about {left / 60:.0f} min left (done ~{eta})")
-    if dry_run and commands:
+    if dry_run and commands and diffusers:
+        problem = cd.check_call(s.engine, commands[0]["call"])
+        log(f"diffusers argument check: {problem or 'OK'}")
+    elif dry_run and commands:
         problem = validate_with_mflux(commands[0])
         log(f"mflux argument check: {problem or 'OK'}")
     return commands

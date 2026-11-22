@@ -58,12 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--engine", choices=["flux2-lora", "flux3"], default="flux2-lora",
                    help="flux2-lora = FLUX.2 Klein base 9B + manga LoRA; flux3 = FLUX 3 Image Klein multi-reference")
-    p.add_argument("--dry-run", action="store_true", help="print the mflux commands, don't run")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the mflux commands (mlx) or the diffusers calls (diffusers), don't run")
+    p.add_argument("--runtime", choices=["auto", "mlx", "diffusers"], default="auto",
+                   help="mlx = mflux on Apple Silicon; diffusers = PyTorch on Linux (ROCm/CUDA) or CPU; "
+                        "auto = mlx on macOS arm64, else diffusers")
     p.add_argument("--backend", choices=["api", "cli"], default="api",
-                   help="api = load the model once per batch (fast); cli = one mflux process per page")
-    p.add_argument("--model")
+                   help="api = load the model once per batch (fast); cli = one mflux process per page (mlx only)")
+    p.add_argument("--device", help="diffusers only: auto (cuda > mps > cpu) | cuda | rocm | mps | cpu")
+    p.add_argument("--dtype", choices=["auto", "bf16", "fp16", "fp32"],
+                   help="diffusers only: auto = bf16 where supported, fp32 on CPU")
+    p.add_argument("--model", help="model name (e.g. flux2-klein-base-9b); under diffusers also a repo id")
     p.add_argument("--model-path", help="local (e.g. pre-quantised) model directory")
-    p.add_argument("-q", "--quantize", type=int, choices=[3, 4, 5, 6, 8])
+    p.add_argument("-q", "--quantize", type=int, choices=[3, 4, 5, 6, 8], help="mlx only (ignored by diffusers)")
     p.add_argument("--no-quantize", action="store_true")
     p.add_argument("--no-bake-lora", action="store_true",
                    help="apply the LoRA on the fly instead of folding it in at load (avoids GPU timeouts on 16 GB Macs)")

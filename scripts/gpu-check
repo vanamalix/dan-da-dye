@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Is torch seeing the GPU, and does it compute correctly?  Run with the main venv's python.
+
+    python scripts/gpu-check [--device auto|cuda|mps|cpu] [--expect-gpu] [--skip-diffusion] [--json]
+
+Reports the torch build (ROCm, CUDA, MPS or CPU), device names and memory, relevant environment
+variables, a timed matmul checked against the CPU, and a tiny diffusion step: a random-weight FLUX.2 Klein
+pipeline when diffusers is installed (a few MB from the Hugging Face Hub, honours HF_HOME), otherwise a
+small convolutional forward and backward pass. Exit status is non-zero if a check fails, or if --expect-gpu
+was given and no GPU is in use.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+TINY_REPO = "optimum-intel-internal-testing/tiny-random-flux.2-klein"
+ENV_HINTS = ("HSA_OVERRIDE_GFX_VERSION", "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES",
+             "CUDA_VISIBLE_DEVICES", "PYTORCH_ENABLE_MPS_FALLBACK", "HF_HOME")
+
+
+def choose_device(name, cuda_available, mps_available):
+    """auto: cuda (ROCm or NVIDIA) > mps > cpu. Same rule as the Magi worker."""
+    if name == "auto":
+        return "cuda" if cuda_available else ("mps" if mps_available else "cpu")
+    return name
+
+
+def backend_of(torch, device):
+    if device == "cuda":
+        hip = getattr(torch.version, "hip", None)
+        return f"ROCm (HIP {hip})" if hip else f"CUDA {torch.version.cuda}"
+    return {"mps": "MPS", "cpu": "CPU"}.get(device, device)
+
+
+def describe(torch):
+    info = {"torch": torch.__version__, "python": sys.version.split()[0],
+            "build": "ROCm" if getattr(torch.version, "hip", None) else ("CUDA" if torch.version.cuda else "CPU-only"),
+            "hip": getattr(torch.version, "hip", None), "cuda": torch.version.cuda,
+            "cuda_available": torch.cuda.is_available(),
+            "mps_available": bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()),
+            "devices": [], "env": {k: os.environ.get(k) for k in ENV_HINTS if os.environ.get(k) is not None},
+            "dev_nodes": {p: os.path.exists(p) for p in ("/dev/kfd", "/dev/dri")}}
+    if info["cuda_available"]:
+        for i in range(torch.cuda.device_count()):
+            free, total = torch.cuda.mem_get_info(i)
+            props = torch.cuda.get_device_properties(i)
+            info["devices"].append({"index": i, "name": props.name, "total_gb": round(total / 2**30, 1),
+                                    "free_gb": round(free / 2**30, 1),
+                                    "arch": getattr(props, "gcnArchName", None) or f"sm_{props.major}{props.minor}"})
+    return info
+
+
+def sync(torch, device):
+    if device == "cuda":
+        torch.cuda.synchronize()
+    elif device == "mps":
+        torch.mps.synchronize()
+
+
+def check_matmul(torch, device, n=None):
+    """Timed matmul in fp32 and bf16 on the device, compared with the CPU result."""
+    n = n or (1024 if device != "cpu" else 256)
+    out = {}
+    g = torch.Generator().manual_seed(0)
+    a = torch.randn(n, n, generator=g)
+    b = torch.randn(n, n, generator=g)
+    ref = a @ b
+    for name, dt, tol in (("fp32", torch.float32, 1e-2), ("bf16", torch.bfloat16, 5e-2)):
+        try:
+            da, db = a.to(device, dt), b.to(device, dt)
+            (da @ db)
+            sync(torch, device)
+            t0 = time.perf_counter()
+            reps = 10
+            for _ in range(reps):
+                r = da @ db
+            sync(torch, device)
+            dt_ms = (time.perf_counter() - t0) / reps * 1000
+            rel = float(((r.float().cpu() - ref).norm() / ref.norm()))
+            out[name] = {"ok": rel < tol, "ms": round(dt_ms, 2), "tflops": round(2 * n**3 / (dt_ms / 1000) / 1e12, 3),
+                         "rel_error": rel}
+        except Exception as e:
+            out[name] = {"ok": False, "error": repr(e)}
+    return out
+
+
+def check_diffusers(torch, device):
+    from diffusers import Flux2KleinPipeline
+    from PIL import Image
+    dtype = torch.bfloat16 if device != "cpu" else torch.float32
+    pipe = Flux2KleinPipeline.from_pretrained(TINY_REPO, dtype=dtype).to(device)
+    pipe.set_progress_bar_config(disable=True)
+    refs = [Image.new("RGB", (64, 64), c) for c in ((200, 80, 90), (40, 60, 120))]
+    gen = torch.Generator(device="cpu").manual_seed(0)
+    t0 = time.perf_counter()
+    res = pipe(image=refs, prompt="a test", height=64, width=64, num_inference_steps=2,
+               guidance_scale=1.0, generator=gen, max_sequence_length=32)
+    sync(torch, device)
+    img = res.images[0]
+    return {"kind": "flux2-klein-tiny", "ok": img.size == (64, 64), "seconds": round(time.perf_counter() - t0, 2),
+            "reference_images": len(refs), "output_size": list(img.size)}
+
+
+def check_conv(torch, device):
+    nn = torch.nn
+    net = nn.Sequential(nn.Conv2d(3, 16, 3, padding=1), nn.GroupNorm(4, 16), nn.SiLU(),
+                        nn.Conv2d(16, 16, 3, padding=1), nn.SiLU(), nn.Conv2d(16, 3, 3, padding=1)).to(device)
+    x = torch.randn(2, 3, 64, 64, device=device)
+    t0 = time.perf_counter()
+    loss = (net(x) - x).pow(2).mean()
+    loss.backward()
+    sync(torch, device)
+    finite = bool(torch.isfinite(loss).item()) and all(torch.isfinite(p.grad).all().item() for p in net.parameters())
+    return {"kind": "conv-fallback", "ok": finite, "seconds": round(time.perf_counter() - t0, 2)}
+
+
+def check_diffusion(torch, device):
+    try:
+        import diffusers  # noqa: F401
+    except ImportError:
+        return check_conv(torch, device) | {"note": "diffusers not installed; ran a conv forward/backward instead"}
+    try:
+        return check_diffusers(torch, device)
+    except Exception as e:
+        return {"kind": "flux2-klein-tiny", "ok": False, "error": repr(e)[:500]}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--device", default="auto", help="auto | cuda | mps | cpu (cuda covers ROCm)")
+    ap.add_argument("--expect-gpu", action="store_true", help="exit non-zero unless a GPU is in use")
+    ap.add_argument("--skip-diffusion", action="store_true", help="skip the diffusion step (no download)")
+    ap.add_argument("--json", action="store_true", help="print one JSON object instead of text")
+    args = ap.parse_args(argv)
+
+    try:
+        import torch
+    except ImportError as e:
+        print(f"gpu-check: torch is not installed in this interpreter ({e})", file=sys.stderr)
+        return 2
+    info = describe(torch)
+    device = choose_device(args.device, info["cuda_available"], info["mps_available"])
+    info["device"], info["backend"] = device, backend_of(torch, device)
+    failures = []
+    if device == "cuda" and not info["cuda_available"]:
+        failures.append("cuda requested but torch.cuda.is_available() is False")
+        device = "cpu"
+    if device == "mps" and not info["mps_available"]:
+        failures.append("mps requested but not available")
+        device = "cpu"
+    on_gpu = device in ("cuda", "mps")
+    if args.expect_gpu and not on_gpu:
+        failures.append("--expect-gpu given but no GPU is in use")
+    try:
+        info["matmul"] = check_matmul(torch, device)
+        failures += [f"matmul {k} failed" for k, v in info["matmul"].items() if not v["ok"]]
+        if not args.skip_diffusion:
+            info["diffusion"] = check_diffusion(torch, device)
+            if not info["diffusion"]["ok"]:
+                failures.append("diffusion step failed")
+    except Exception as e:  # a GPU that is visible but cannot compute
+        failures.append(f"compute failed on {device}: {e!r}")
+    info["failures"], info["ok"] = failures, not failures
+
+    if args.json:
+        print(json.dumps(info, indent=2))
+    else:
+        print(f"torch {info['torch']}  python {info['python']}  build: {info['build']}")
+        print(f"backend in use: {info['backend']}  (device '{device}')")
+        for d in info["devices"]:
+            print(f"  gpu {d['index']}: {d['name']} [{d['arch']}]  {d['total_gb']} GB total, {d['free_gb']} GB free")
+        if not info["devices"]:
+            print("  no GPU visible to torch" + ("" if info["build"] == "CPU-only" else " (check /dev/kfd, /dev/dri, groups and env below)"))
+        print("  nodes: " + ", ".join(f"{p} {'present' if v else 'absent'}" for p, v in info["dev_nodes"].items()))
+        print("  env: " + (", ".join(f"{k}={v}" for k, v in info["env"].items()) or "none of the hint variables are set"))
+        for k, v in info["matmul"].items():
+            print(f"  matmul {k}: " + (f"{v['ms']} ms, {v['tflops']} TFLOPS, rel. error vs CPU {v['rel_error']:.1e}, {'ok' if v['ok'] else 'FAILED'}"
+                                       if "ms" in v else f"FAILED {v['error']}"))
+        if "diffusion" in info:
+            d = info["diffusion"]
+            print(f"  diffusion ({d['kind']}): {'ok' if d['ok'] else 'FAILED'}" + (f", {d['seconds']} s" if "seconds" in d else "")
+                  + (f", {d['note']}" if "note" in d else "") + (f", {d['error']}" if "error" in d else ""))
+        print("RESULT: " + ("ok" if info["ok"] else "FAILED: " + "; ".join(failures)))
+    return 0 if info["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

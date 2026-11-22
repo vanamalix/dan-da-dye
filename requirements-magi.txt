@@ -1,5 +1,6 @@
 # Separate venv for the Magi v2 detector (called via subprocess; keeps torch out of the MLX venv).
 #   python3.12 -m venv .venv-magi && .venv-magi/bin/pip install -r requirements-magi.txt
+# On Linux, scripts/setup.sh installs torch and torchvision from the right PyTorch index first (ROCm, CUDA or CPU).
 torch
 torchvision
 transformers==4.45.2   # Magi v2's remote code targets 4.3x/4.4x
@@ -12,4 +13,4 @@ matplotlib
 pillow
 numpy<2.3
 pulp==2.9.0            # pulp 3+ removed LpVariable.dicts, which Magi uses
-highspy                # pulp's bundled CBC is x86-only on macOS; the worker switches to HiGHS
+highspy                # pulp's bundled CBC is x86-only on macOS (and absent on Linux aarch64); the worker prefers HiGHS

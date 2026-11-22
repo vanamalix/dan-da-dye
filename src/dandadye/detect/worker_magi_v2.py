@@ -2,11 +2,14 @@
 
 Usage: python -I worker_magi_v2.py job.json result.json
 
-job.json: {"model_dir": ..., "device": "auto|mps|cpu", "eta": 0.75,
+job.json: {"model_dir": ..., "device": "auto|cuda|mps|cpu", "eta": 0.75,
            "pages": [path, ...], "bank": {"images": [path, ...], "names": [name, ...]}}
 
 This file must stay standalone: it is executed by a different interpreter and
-cannot import dandadye.
+cannot import dandadye. Heavy imports (torch, numpy, transformers) happen inside
+functions, so the device choice below can be imported and tested without torch.
+
+"cuda" covers both NVIDIA CUDA and AMD ROCm (PyTorch's ROCm build uses the torch.cuda API).
 """
 
 import json
@@ -15,13 +18,38 @@ import sys
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-import numpy as np  # noqa: E402
-import torch  # noqa: E402
-from PIL import Image  # noqa: E402
-from transformers import AutoConfig, AutoModel  # noqa: E402
+
+def choose_device(name, cuda_available, mps_available):
+    """Pure device choice. auto: cuda (ROCm or NVIDIA) > mps > cpu. Explicit names pass through."""
+    if name == "auto":
+        if cuda_available:
+            return "cuda"
+        return "mps" if mps_available else "cpu"
+    return name
+
+
+def describe_device(device, torch):
+    """One log line saying what we are actually running on."""
+    if device == "cuda":
+        hip = getattr(torch.version, "hip", None)
+        try:
+            gpu = torch.cuda.get_device_name(0)
+        except Exception:
+            gpu = "unknown GPU"
+        kind = f"ROCm (HIP {hip})" if hip else f"CUDA {getattr(torch.version, 'cuda', None)}"
+        return f"cuda device via {kind}: {gpu}"
+    return device
+
+
+def pick_device(name):
+    import torch
+    mps = getattr(torch.backends, "mps", None)
+    return choose_device(name, torch.cuda.is_available(), bool(mps and mps.is_available()))
 
 
 def read_image(path):
+    import numpy as np
+    from PIL import Image
     with Image.open(path) as im:
         return np.array(im.convert("L").convert("RGB"))
 
@@ -46,6 +74,8 @@ def pick_device(name):
 
 
 def run(job, device):
+    import torch
+    from transformers import AutoConfig, AutoModel
     # OCR off (we only need boxes); the timm ResNet backbone weights are inside the
     # checkpoint, so don't let timm try to download ImageNet weights.
     config = AutoConfig.from_pretrained(job["model_dir"], trust_remote_code=True, disable_ocr=True)
@@ -84,9 +114,11 @@ def main():
     job = json.load(open(sys.argv[1]))
     use_native_solver()
     device = pick_device(job.get("device", "auto"))
+    import torch
+    print(f"magi worker: using {describe_device(device, torch)}", file=sys.stderr)
     try:
         pages = run(job, device)
-    except Exception as e:  # some ops are flaky on MPS; CPU always works
+    except Exception as e:  # some ops are flaky on MPS (or an unsupported GPU); CPU always works
         if device == "cpu":
             raise
         print(f"magi worker: {device} failed ({e!r}); retrying on cpu", file=sys.stderr)

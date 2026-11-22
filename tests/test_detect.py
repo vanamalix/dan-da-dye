@@ -81,3 +81,47 @@ def test_detect_run_with_pluggable_detector(ingested, monkeypatch):
     (cfg.work / "detect" / "10" / "names.json").write_text(json.dumps({str(cluster): "Bob"}))
     detect.run(cfg, st, ["10"], detector="fake", log=lambda *a: None)
     assert st.get("10/001")["detect"]["name_counts"] == {"Bob": 1}
+
+
+def _load_worker():
+    """Load the standalone worker file without torch (its heavy imports are lazy)."""
+    import importlib.util
+    import sys
+    from dandadye.detect import magi_v2
+    spec = importlib.util.spec_from_file_location("worker_magi_v2_under_test", magi_v2.WORKER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_worker_imports_without_heavy_deps(monkeypatch):
+    import sys
+    for name in ("torch", "transformers"):
+        monkeypatch.setitem(sys.modules, name, None)   # any import of these now raises
+    mod = _load_worker()
+    assert mod.choose_device("auto", False, False) == "cpu"
+
+
+def test_choose_device_auto_prefers_cuda_then_mps_then_cpu():
+    w = _load_worker()
+    assert w.choose_device("auto", True, True) == "cuda"
+    assert w.choose_device("auto", True, False) == "cuda"
+    assert w.choose_device("auto", False, True) == "mps"
+    assert w.choose_device("auto", False, False) == "cpu"
+
+
+def test_choose_device_explicit_passes_through():
+    w = _load_worker()
+    for name in ("cpu", "mps", "cuda"):
+        assert w.choose_device(name, True, True) == name
+        assert w.choose_device(name, False, False) == name
+
+
+def test_describe_device_rocm_vs_cuda():
+    from types import SimpleNamespace as NS
+    w = _load_worker()
+    cuda = NS(version=NS(hip=None, cuda="12.8"), cuda=NS(get_device_name=lambda i: "RTX 3090"))
+    rocm = NS(version=NS(hip="6.4.1", cuda=None), cuda=NS(get_device_name=lambda i: "AMD Radeon PRO W6800"))
+    assert "CUDA 12.8" in w.describe_device("cuda", cuda) and "RTX 3090" in w.describe_device("cuda", cuda)
+    assert "ROCm" in w.describe_device("cuda", rocm) and "W6800" in w.describe_device("cuda", rocm)
+    assert w.describe_device("mps", cuda) == "mps"

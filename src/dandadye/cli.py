@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("detect", help="panels, characters and names per page (Magi v2)")
     _add_common(p)
     p.add_argument("--detector", default="magi-v2")
-    p.add_argument("--device", default="auto", help="auto | mps | cpu")
+    p.add_argument("--device", default="auto", help="auto | cuda | mps | cpu")
     p.add_argument("--viz", action="store_true", help="also write box overlays to work/detect_viz/")
     p.add_argument("--eta", type=float, default=0.75, help="Magi 'none of the above' cost; lower = more 'Other'")
 
